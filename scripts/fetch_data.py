@@ -6,24 +6,28 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-# Load environment variables from project root .env (at chainrag/.env)
-load_dotenv(dotenv_path=Path(__file__).resolve().parent.parent.parent / ".env")
+CURRENT_SCRIPT_DIR = Path(__file__).resolve().parent
 
-ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY")
-# V2 docs: https://docs.etherscan.io/ — supports multichain via chainid.
-# Default to V2 base URL; override via ENV if needed.
-ETHERSCAN_BASE_URL = os.getenv("ETHERSCAN_BASE_URL", "https://api.etherscan.io/v2/api")
-ETHERSCAN_CHAIN_ID = os.getenv("ETHERSCAN_CHAIN_ID", "1")  # 1 = Ethereum mainnet
+# Project Root directory: chainrag/
+PROJECT_ROOT = CURRENT_SCRIPT_DIR.parent 
 
-# Define paths relative to the script location to ensure data goes to chainrag/data
-# script is in chainrag/data-collection/scripts/
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+# Find the .env file (chainrag/.env)
+ENV_PATH = PROJECT_ROOT / ".env"
+load_dotenv(dotenv_path=ENV_PATH)
+
+# Central Data Folders (chainrag/data/)
 DATA_DIR = PROJECT_ROOT / "data"
-
 RAW_DIR = DATA_DIR / "raw"
 PROC_DIR = DATA_DIR / "processed"
+
+# Create folders if they don't exist
 RAW_DIR.mkdir(parents=True, exist_ok=True)
 PROC_DIR.mkdir(parents=True, exist_ok=True)
+
+# API Keys and Config
+ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY")
+ETHERSCAN_BASE_URL = os.getenv("ETHERSCAN_BASE_URL", "https://api.etherscan.io/v2/api")
+ETHERSCAN_CHAIN_ID = os.getenv("ETHERSCAN_CHAIN_ID", "1")  # 1 = Ethereum mainnet
 
 # -------------------------------
 #  Helpers

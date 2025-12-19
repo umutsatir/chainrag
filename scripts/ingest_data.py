@@ -13,12 +13,11 @@ from langchain_core.documents import Document
 # 1. PROFESSIONAL PATH CONFIGURATION
 # ---------------------------------------------------------
 
-# Location of this file: chainrag/data-embedding/scripts/
+# Location that this script resides in: chainrag/scripts/
 CURRENT_SCRIPT_DIR = Path(__file__).resolve().parent
 
-# Project Root Directory: chainrag/
-# scripts -> data-embedding -> chainrag (3 levels up)
-PROJECT_ROOT = CURRENT_SCRIPT_DIR.parent.parent
+# Project Root directory: chainrag/
+PROJECT_ROOT = CURRENT_SCRIPT_DIR.parent
 
 # Data Paths (Access to central 'data' folder)
 DATA_DIR = PROJECT_ROOT / "data"
