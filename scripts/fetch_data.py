@@ -1,186 +1,202 @@
 import os
 import json
 import requests
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
-
 from dotenv import load_dotenv
 
+# Paths
 CURRENT_SCRIPT_DIR = Path(__file__).resolve().parent
-
-# Project Root directory: chainrag/
 PROJECT_ROOT = CURRENT_SCRIPT_DIR.parent 
-
-# Find the .env file (chainrag/.env)
 ENV_PATH = PROJECT_ROOT / ".env"
 load_dotenv(dotenv_path=ENV_PATH)
 
-# Central Data Folders (chainrag/data/)
 DATA_DIR = PROJECT_ROOT / "data"
 RAW_DIR = DATA_DIR / "raw"
 PROC_DIR = DATA_DIR / "processed"
 
-# Create folders if they don't exist
+# Create directories if they don't exist
 RAW_DIR.mkdir(parents=True, exist_ok=True)
 PROC_DIR.mkdir(parents=True, exist_ok=True)
 
-# API Keys and Config
+# Configuration
 ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY")
-ETHERSCAN_BASE_URL = os.getenv("ETHERSCAN_BASE_URL", "https://api.etherscan.io/v2/api")
-ETHERSCAN_CHAIN_ID = os.getenv("ETHERSCAN_CHAIN_ID", "1")  # 1 = Ethereum mainnet
+ETHERSCAN_BASE_URL = "https://api.etherscan.io/v2/api"
+ETHERSCAN_CHAIN_ID = "1"  # Mainnet
 
-# -------------------------------
-#  Helpers
-# -------------------------------
+# --- IMPORTANT: Transaction Limit ---
+# We limit to the latest 10000 transactions to prevent database bloat
+# and ensure the RAG system remains fast and relevant.
+TX_LIMIT = 10000 
 
 def save_json(path, data):
     with open(path, "w") as f:
         json.dump(data, f, indent=2)
 
 def write_jsonl(path, documents):
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         for doc in documents:
             f.write(json.dumps(doc, ensure_ascii=False) + "\n")
 
 def ts_to_date(ts):
-    return datetime.utcfromtimestamp(int(ts)).strftime("%Y-%m-%d %H:%M:%S")
-
-
-# -------------------------------
-#  Etherscan API wrappers
-# -------------------------------
+    return datetime.fromtimestamp(int(ts), timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
 def call_etherscan(module, action, **params):
-    """Call Etherscan API per docs with chainid + apikey."""
     query = {
         "module": module,
         "action": action,
         "apikey": ETHERSCAN_API_KEY,
-        "chainid": ETHERSCAN_CHAIN_ID,  # V2 supports multichain
+        "chainid": ETHERSCAN_CHAIN_ID,
         **params,
     }
-    resp = requests.get(ETHERSCAN_BASE_URL, params=query, timeout=15)
-    data = resp.json()
+    try:
+        resp = requests.get(ETHERSCAN_BASE_URL, params=query, timeout=20)
+        data = resp.json()
+        
+        if data.get("status") == "0" and data.get("message") == "No transactions found":
+            return []
+        
+        if data.get("status") != "1":
+            print(f"⚠ Etherscan Warning ({action}): {data.get('message')}")
+            return []
 
-    if data.get("status") != "1":
-        # Etherscan returns status "0"/"0" on empty result too; surface message
-        print(f"Etherscan error ({module}/{action}):", data.get("message"), data.get("result"))
+        return data.get("result", [])
+    except Exception as e:
+        print(f"Connection Error: {e}")
         return []
 
-    return data.get("result", [])
-
-
-def fetch_normal_transactions(address, start_block=0, end_block=99999999):
+def fetch_normal_transactions(address):
+    # Fetch latest transactions (sort=desc)
     return call_etherscan(
         module="account",
         action="txlist",
         address=address,
-        startblock=start_block,
-        endblock=end_block,
-        sort="asc",
+        startblock=0,
+        endblock=99999999,
+        page=1,
+        offset=TX_LIMIT,
+        sort="desc",
     )
-
 
 def fetch_erc20_transfers(address):
     return call_etherscan(
         module="account",
         action="tokentx",
         address=address,
-        sort="asc",
+        page=1,
+        offset=TX_LIMIT, 
+        sort="desc",
     )
 
-
-# -------------------------------
-#  Convert raw data → RAG format
-# -------------------------------
+# --- DATA CONVERSION & PREPARATION ---
 
 def convert_to_documents(address, normal_txs, erc20_txs):
     docs = []
 
-    # --- Normal transactions ---
-    for tx in normal_txs:
+    # 1. Process Normal Transactions
+    for idx, tx in enumerate(normal_txs):
+        val_eth = float(tx['value']) / 1e18
+        date_str = ts_to_date(tx['timeStamp'])
+        
+        # Text for LLM to read
         text = (
-            f"[NORMAL TX]\n"
-            f"Hash: {tx['hash']}\n"
-            f"Block: {tx['blockNumber']}\n"
-            f"Date: {ts_to_date(tx['timeStamp'])}\n"
+            f"[NORMAL TRANSACTION]\n"
+            f"Type: Ethereum Transfer\n"
+            f"Date: {date_str}\n"
+            f"Amount: {val_eth:.6f} ETH\n"
             f"From: {tx['from']}\n"
             f"To: {tx['to']}\n"
-            f"Value (ETH): {int(tx['value']) / 1e18}\n"
-            f"Gas Used: {tx['gasUsed']}\n"
+            f"Hash: {tx['hash']}\n"
         )
+        
+        # Determine Direction
+        direction = "Outgoing" if tx["from"].lower() == address.lower() else "Incoming"
 
         docs.append({
-            "id": f"normal_{tx['hash']}",
+            "id": f"normal_{tx['hash']}", 
             "address": address,
             "type": "normal_tx",
-            "date": ts_to_date(tx["timeStamp"]),
+            "date": date_str,
+            "timestamp": int(tx['timeStamp']),
+            "token": "ETH",
+            "direction": direction,
             "tx_hash": tx["hash"],
             "text": text
         })
 
-    # --- ERC20 transfers ---
-    for tx in erc20_txs:
-        direction = (
-            "Outgoing" if tx["from"].lower() == address.lower()
-            else "Incoming"
-        )
+    # 2. Process ERC20 Token Transfers
+    for idx, tx in enumerate(erc20_txs):
+        try:
+            decimals = int(tx["tokenDecimal"])
+            amount = float(tx["value"]) / (10 ** decimals)
+        except:
+            amount = 0.0
 
-        amount = int(tx["value"]) / (10 ** int(tx["tokenDecimal"]))
+        direction = "Outgoing" if tx["from"].lower() == address.lower() else "Incoming"
+        date_str = ts_to_date(tx['timeStamp'])
 
         text = (
-            f"[ERC20 TRANSFER]\n"
-            f"Hash: {tx['hash']}\n"
-            f"Block: {tx['blockNumber']}\n"
-            f"Date: {ts_to_date(tx['timeStamp'])}\n"
-            f"Token: {tx['tokenName']} ({tx['tokenSymbol']})\n"
-            f"Amount: {amount}\n"
+            f"[TOKEN TRANSFER]\n"
+            f"Type: ERC20 Transfer\n"
+            f"Date: {date_str}\n"
+            f"Token: {tx['tokenSymbol']} ({tx['tokenName']})\n"
+            f"Amount: {amount:.4f} {tx['tokenSymbol']}\n"
+            f"Direction: {direction}\n"
             f"From: {tx['from']}\n"
             f"To: {tx['to']}\n"
-            f"Direction: {direction}\n"
+            f"Hash: {tx['hash']}\n"
         )
 
+        # UNIQUE ID GENERATION:
+        # A single transaction hash may contain multiple transfers.
+        # We append the index '_{idx}' to prevent overwriting data in FAISS.
+        unique_id = f"erc20_{tx['hash']}_{idx}"
+
         docs.append({
-            "id": f"erc20_{tx['hash']}",
+            "id": unique_id,
             "address": address,
             "type": "erc20_transfer",
-            "date": ts_to_date(tx["timeStamp"]),
+            "date": date_str,
+            "timestamp": int(tx['timeStamp']),
             "token": tx["tokenSymbol"],
+            "direction": direction,
             "tx_hash": tx["hash"],
             "text": text
         })
 
     return docs
 
-
-# -------------------------------
-#  Main
-# -------------------------------
-
 def main():
-    address = input("Enter Ethereum address: ").strip()
+    address = input("Enter Ethereum Address (e.g., Vitalik): ").strip()
+    if not address:
+        print("No address provided.")
+        return
 
-    print(f"Fetching data for: {address}")
+    print(f"\n📡 Fetching data for: {address}")
+    print(f"   (Limit: Last {TX_LIMIT} transactions)")
 
     normal_txs = fetch_normal_transactions(address)
+    print(f"✔ Fetched {len(normal_txs)} Normal ETH transactions.")
+    
     erc20_txs = fetch_erc20_transfers(address)
+    print(f"✔ Fetched {len(erc20_txs)} ERC20 Token transfers.")
 
-    print(f"Normal TX count: {len(normal_txs)}")
-    print(f"ERC20 TX count: {len(erc20_txs)}")
-
-    # Save raw
+    # Save raw data for debugging
     save_json(RAW_DIR / "normal_txs.json", normal_txs)
     save_json(RAW_DIR / "erc20_transfers.json", erc20_txs)
 
-    # Process → documents.jsonl
+    # Convert to RAG format
     documents = convert_to_documents(address, normal_txs, erc20_txs)
+    
+    # Save processed data
     write_jsonl(PROC_DIR / "documents.jsonl", documents)
 
-    print(f"Generated {len(documents)} documents!")
-    print("Saved to: data/processed/documents.jsonl")
+    print(f"\n✨ Successfully processed {len(documents)} documents.")
+    print(f"💾 Saved to: {PROC_DIR / 'documents.jsonl'}")
+    print("\nNext Step: Run 'python scripts/ingest_data.py' to build the vector database.")
 
 if __name__ == "__main__":
     if not ETHERSCAN_API_KEY:
-        print("ERROR: Set ETHERSCAN_API_KEY environment variable first.")
+        print("ERROR: ETHERSCAN_API_KEY not found. Please check your .env file.")
     else:
         main()
