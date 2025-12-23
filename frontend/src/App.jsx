@@ -427,21 +427,21 @@ function App() {
                     {/* Sidebar */}
                     <div className="col-span-12 md:col-span-4 lg:col-span-3 space-y-4">
                         {/* New chat creator */}
-                        <div className="bg-white border border-gray-200 rounded-xl shadow-md p-3 flex gap-2 items-center h-14">
+                        <div className="bg-white border border-gray-200 rounded-xl shadow-md p-3 flex gap-2 items-center min-h-[56px]">
                             <input
                                 value={addressInput}
                                 onChange={(e) =>
                                     setAddressInput(e.target.value)
                                 }
-                                placeholder="Ethereum address (public key)"
-                                className="flex-1 h-12 px-3 outline-none text-gray-700 placeholder-gray-400 bg-transparent"
+                                placeholder="Ethereum address"
+                                className="flex-1 min-w-0 h-10 px-3 outline-none text-gray-700 placeholder-gray-400 bg-transparent text-sm truncate"
                                 onKeyPress={(e) =>
                                     e.key === "Enter" && startChat()
                                 }
                             />
                             <button
                                 onClick={startChat}
-                                className="h-12 px-5 rounded-lg font-medium bg-blue-600 hover:bg-blue-700 text-white shadow-md hover:shadow-lg"
+                                className="h-10 px-4 rounded-lg font-medium bg-blue-600 hover:bg-blue-700 text-white shadow-md hover:shadow-lg shrink-0 text-sm"
                             >
                                 Yeni
                             </button>
