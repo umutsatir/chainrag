@@ -2,6 +2,9 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import os
 import json
+import sys
+import subprocess
+import threading
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -27,32 +30,87 @@ app.add_middleware(
 # Paths
 CURRENT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = CURRENT_DIR.parent
+SCRIPTS_DIR = PROJECT_ROOT / "scripts"
 ENV_PATH = PROJECT_ROOT / ".env"
-DB_DIR = PROJECT_ROOT / "data" / "vector_db"
+DB_ROOT = PROJECT_ROOT / "data" / "vector_db"
 
 load_dotenv(dotenv_path=ENV_PATH)
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
-# 1. INITIALIZE MODELS
+# 1. INITIALIZE MODELS (shared)
 embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
 
-# We use gemini-1.5-flash for higher rate limits and stability
 llm = ChatGoogleGenerativeAI(
-    model="gemini-1.5-flash", 
+    model="gemini-2.5-flash", 
     google_api_key=GOOGLE_API_KEY,
     temperature=0 
 )
 
-# 2. LOAD DATABASE
-vector_store = None
-if DB_DIR.exists():
+# Vector store cache per tag
+VECTOR_CACHE = {}
+
+# Prep job statuses per tag
+PREP_STATUS = {}
+
+def sanitize_tag(raw_tag: str) -> str:
+    import re
+    cleaned = re.sub(r"[^a-zA-Z0-9_-]+", "-", raw_tag).strip("-").lower()
+    return cleaned
+
+def load_vector_store(tag: str):
+    cleaned = sanitize_tag(tag)
+    if cleaned in VECTOR_CACHE:
+        return VECTOR_CACHE[cleaned]
+    
+    target_dir = DB_ROOT / cleaned
+    if not target_dir.exists():
+        raise HTTPException(status_code=404, detail=f"Vector DB for tag '{cleaned}' not found.")
     try:
-        vector_store = FAISS.load_local(str(DB_DIR), embeddings, allow_dangerous_deserialization=True)
-        print("✔ Vector Database loaded successfully.")
+        store = FAISS.load_local(str(target_dir), embeddings, allow_dangerous_deserialization=True)
+        VECTOR_CACHE[cleaned] = store
+        return store
     except Exception as e:
-        print(f"Database Error: {e}")
-else:
-    print(f"WARNING: Database not found at {DB_DIR}")
+        raise HTTPException(status_code=500, detail=f"Failed to load vector DB: {e}")
+
+def run_pipeline(tag: str, address: str):
+    """
+    Run fetch_data then ingest_data for the given address/tag.
+    Updates PREP_STATUS along the way for frontend polling.
+    """
+    cleaned = sanitize_tag(tag)
+    PREP_STATUS[cleaned] = {"state": "running", "message": "Fetching data..."}
+    try:
+        fetch_cmd = [
+            sys.executable,
+            str(SCRIPTS_DIR / "fetch_data.py"),
+            "--address",
+            address,
+        ]
+        fetch_res = subprocess.run(fetch_cmd, capture_output=True, text=True)
+        if fetch_res.returncode != 0:
+            PREP_STATUS[cleaned] = {"state": "error", "message": fetch_res.stderr or "fetch_data failed"}
+            return
+
+        PREP_STATUS[cleaned] = {"state": "running", "message": "Building embeddings..."}
+        ingest_cmd = [
+            sys.executable,
+            str(SCRIPTS_DIR / "ingest_data.py"),
+            "--tag",
+            cleaned,
+            "--db-dir",
+            str(DB_ROOT),
+        ]
+        ingest_res = subprocess.run(ingest_cmd, capture_output=True, text=True)
+        if ingest_res.returncode != 0:
+            PREP_STATUS[cleaned] = {"state": "error", "message": ingest_res.stderr or "ingest_data failed"}
+            return
+
+        PREP_STATUS[cleaned] = {"state": "done", "message": "Vector DB ready."}
+        # Warm cache
+        VECTOR_CACHE.pop(cleaned, None)
+        load_vector_store(cleaned)
+    except Exception as e:
+        PREP_STATUS[cleaned] = {"state": "error", "message": str(e)}
 
 
 # --- 3. ADVANCED INTENT ANALYSIS (LIMIT + SORT + FILTER) ---
@@ -112,14 +170,40 @@ answer_prompt = ChatPromptTemplate.from_template(answer_template)
 answer_chain = answer_prompt | llm | StrOutputParser()
 
 
-# --- 5. API ENDPOINT ---
+# --- 5. API ENDPOINTS ---
 class QueryRequest(BaseModel):
     query: str
+    tag: str
+
+class PrepRequest(BaseModel):
+    address: str
+
+@app.post("/prepare")
+async def prepare_endpoint(req: PrepRequest):
+    tag = sanitize_tag(req.address)
+    existing = PREP_STATUS.get(tag)
+    if existing and existing.get("state") in {"running", "done"}:
+        return {"tag": tag, "status": existing}
+
+    # Kick off background thread
+    thread = threading.Thread(target=run_pipeline, args=(tag, req.address), daemon=True)
+    thread.start()
+    PREP_STATUS[tag] = {"state": "running", "message": "Queued..."}
+    return {"tag": tag, "status": PREP_STATUS[tag]}
+
+@app.get("/prepare/status")
+async def prepare_status(tag: str):
+    cleaned = sanitize_tag(tag)
+    status = PREP_STATUS.get(cleaned)
+    if not status:
+        return {"tag": cleaned, "status": {"state": "unknown", "message": "No job found."}}
+    return {"tag": cleaned, "status": status}
 
 @app.post("/chat")
 async def chat_endpoint(request: QueryRequest):
-    if not vector_store:
-        raise HTTPException(status_code=500, detail="Vector Database is not loaded.")
+    if not request.tag:
+        raise HTTPException(status_code=400, detail="tag is required")
+    vector_store = load_vector_store(request.tag)
     
     try:
         # A. Intent Extraction
