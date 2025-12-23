@@ -2,6 +2,8 @@ import { useState, useEffect, useRef } from "react";
 import ReactMarkdown from "react-markdown";
 
 const API_BASE = "http://127.0.0.1:8000";
+const META_KEY = "chainrag_chats_meta_v1";
+const MSG_KEY_PREFIX = "chainrag_chat_msgs_v1_";
 
 const sanitizeTag = (text) =>
     text
@@ -13,15 +15,18 @@ const sanitizeTag = (text) =>
 function App() {
     const [addressInput, setAddressInput] = useState("");
     const [query, setQuery] = useState("");
-    const [chats, setChats] = useState([]);
+    const [chats, setChats] = useState([]); // metadata only (no messages)
     const [activeChatId, setActiveChatId] = useState(null);
+    const [activeMessages, setActiveMessages] = useState([]); // messages of active chat
     const [pollingTag, setPollingTag] = useState(null);
     const pollRef = useRef(null);
     const lastMessageRef = useRef(null);
+    const hydratedRef = useRef(false);
+    const prevChatsRef = useRef([]);
 
     const activeChat = chats.find((c) => c.id === activeChatId);
 
-    // Scroll to the last message when chat changes
+    // Scroll to the last message when messages change
     useEffect(() => {
         if (lastMessageRef.current) {
             lastMessageRef.current.scrollIntoView({
@@ -29,7 +34,7 @@ function App() {
                 block: "start",
             });
         }
-    }, [activeChat?.messages]);
+    }, [activeMessages]);
 
     // Poll backend for preparation status
     useEffect(() => {
@@ -57,7 +62,7 @@ function App() {
                     if (pollRef.current) clearInterval(pollRef.current);
                 }
             } catch (err) {
-                console.error("Status poll error", err);
+                // Status poll error - silent fail
             }
         };
         tick();
@@ -66,6 +71,118 @@ function App() {
             if (pollRef.current) clearInterval(pollRef.current);
         };
     }, [pollingTag]);
+
+    const loadMessages = (chatId) => {
+        if (!chatId || typeof window === "undefined") return [];
+        try {
+            const key = `${MSG_KEY_PREFIX}${chatId}`;
+            const raw = localStorage.getItem(key);
+            if (!raw) return [];
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed)) return parsed;
+        } catch (err) {
+            // Failed to load messages - silent fail
+        }
+        return [];
+    };
+
+    const saveMessages = (chatId, msgs) => {
+        if (!chatId || typeof window === "undefined") return;
+        try {
+            const key = `${MSG_KEY_PREFIX}${chatId}`;
+            localStorage.setItem(key, JSON.stringify(msgs));
+        } catch (err) {
+            // Failed to save messages - silent fail
+        }
+    };
+
+    // Load chats/activeChatId from localStorage on mount
+    useEffect(() => {
+        if (typeof window === "undefined") return;
+        try {
+            const raw = localStorage.getItem(META_KEY);
+            if (raw) {
+                const parsed = JSON.parse(raw);
+                if (parsed && Array.isArray(parsed.chats)) {
+                    // Ensure all chats have loading: false on load (prevents stuck typing state)
+                    const normalizedChats = parsed.chats.map((chat) => ({
+                        ...chat,
+                        loading: false, // Always reset loading state on refresh
+                    }));
+                    setChats(normalizedChats);
+                    prevChatsRef.current = normalizedChats; // Track loaded chats
+
+                    // Determine active chat ID: prefer saved one, but verify it exists
+                    let initialId = null;
+                    if (parsed.activeChatId) {
+                        // Verify the saved activeChatId actually exists in chats
+                        const chatExists = normalizedChats.some(
+                            (c) => c.id === parsed.activeChatId
+                        );
+                        if (chatExists) {
+                            initialId = parsed.activeChatId;
+                        } else if (normalizedChats.length > 0) {
+                            // Fallback to first chat if saved ID doesn't exist
+                            initialId = normalizedChats[0].id;
+                        }
+                    } else if (normalizedChats.length > 0) {
+                        initialId = normalizedChats[0].id;
+                    }
+
+                    setActiveChatId(initialId);
+                    if (initialId) {
+                        const msgs = loadMessages(initialId);
+                        setActiveMessages(msgs);
+                    } else {
+                        setActiveMessages([]);
+                    }
+                }
+            }
+            // Mark as hydrated after initial load completes (even if no data)
+            hydratedRef.current = true;
+        } catch (err) {
+            // Failed to load chats meta - still mark as hydrated
+            hydratedRef.current = true;
+        }
+    }, []);
+
+    // Persist chats + activeChatId to localStorage whenever they change
+    useEffect(() => {
+        if (typeof window === "undefined") return;
+        // Don't save until initial hydration is complete
+        if (!hydratedRef.current) {
+            return;
+        }
+
+        // Safety check: Don't overwrite with empty chats if we had chats before
+        // This prevents accidental deletion during re-renders
+        const hadChats = prevChatsRef.current.length > 0;
+        const hasChats = chats.length > 0;
+
+        if (!hasChats && hadChats) {
+            return; // Don't save empty chats if we had chats before
+        }
+
+        try {
+            localStorage.setItem(
+                META_KEY,
+                JSON.stringify({ chats, activeChatId })
+            );
+            prevChatsRef.current = chats;
+        } catch (err) {
+            // Failed to save chats meta - silent fail
+        }
+    }, [chats, activeChatId]);
+
+    // When activeChatId changes, load its messages
+    useEffect(() => {
+        if (!activeChatId) {
+            setActiveMessages([]);
+            return;
+        }
+        const msgs = loadMessages(activeChatId);
+        setActiveMessages(msgs);
+    }, [activeChatId]);
 
     const startChat = async () => {
         if (!addressInput) return;
@@ -76,11 +193,12 @@ function App() {
             tag,
             status: "preparing",
             statusMessage: "Hazırlanıyor...",
-            messages: [],
             loading: false,
         };
         setChats((prev) => [...prev, newChat]);
         setActiveChatId(newChat.id);
+        saveMessages(newChat.id, []);
+        setActiveMessages([]);
         setAddressInput("");
 
         try {
@@ -105,7 +223,6 @@ function App() {
             );
             setPollingTag(tag);
         } catch (err) {
-            console.error(err);
             setChats((prev) =>
                 prev.map((chat) =>
                     chat.id === newChat.id
@@ -123,13 +240,13 @@ function App() {
     const sendMessage = async () => {
         if (!activeChat || !query || activeChat.status !== "done") return;
         const userMsg = { role: "user", content: query };
-        const updatedMessages = [...activeChat.messages, userMsg];
+        const updatedMessages = [...activeMessages, userMsg];
 
+        setActiveMessages(updatedMessages);
+        saveMessages(activeChat.id, updatedMessages);
         setChats((prev) =>
             prev.map((c) =>
-                c.id === activeChat.id
-                    ? { ...c, messages: updatedMessages, loading: true }
-                    : c
+                c.id === activeChat.id ? { ...c, loading: true } : c
             )
         );
         setQuery("");
@@ -150,29 +267,32 @@ function App() {
                 content: data.answer,
                 sources: data.sources,
             };
+            const finalMessages = [...updatedMessages, assistantMsg];
+            setActiveMessages(finalMessages);
+            saveMessages(activeChat.id, finalMessages);
             setChats((prev) =>
                 prev.map((c) =>
                     c.id === activeChat.id
                         ? {
                               ...c,
-                              messages: [...updatedMessages, assistantMsg],
                               loading: false,
                           }
                         : c
                 )
             );
         } catch (err) {
-            console.error(err);
             const errorMsg = {
                 role: "assistant",
                 content: "Bir hata oluştu. Backend çalışıyor mu?",
             };
+            const finalMessages = [...updatedMessages, errorMsg];
+            setActiveMessages(finalMessages);
+            saveMessages(activeChat.id, finalMessages);
             setChats((prev) =>
                 prev.map((c) =>
                     c.id === activeChat.id
                         ? {
                               ...c,
-                              messages: [...updatedMessages, errorMsg],
                               loading: false,
                           }
                         : c
@@ -191,6 +311,19 @@ function App() {
         }
 
         if (activeChat.status !== "done") {
+            if (activeChat.status === "error") {
+                return (
+                    <div className="flex flex-col items-center justify-center h-full text-red-600 gap-2 text-sm">
+                        <p>
+                            Hazırlık hatası:{" "}
+                            {activeChat.statusMessage || "Bilinmeyen hata."}
+                        </p>
+                        <p className="text-xs text-gray-400">
+                            Tag: {activeChat.tag}
+                        </p>
+                    </div>
+                );
+            }
             return (
                 <div className="flex flex-col items-center justify-center h-full text-gray-600 gap-2">
                     <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600" />
@@ -202,7 +335,7 @@ function App() {
             );
         }
 
-        if (activeChat.messages.length === 0) {
+        if (activeMessages.length === 0) {
             return (
                 <div className="text-center text-gray-400 mt-20">
                     <p>Henüz mesaj yok. Sorunu yaz.</p>
@@ -210,13 +343,9 @@ function App() {
             );
         }
 
-        return activeChat.messages.map((msg, idx) => (
+        return activeMessages.map((msg, idx) => (
             <div
-                ref={
-                    idx === activeChat.messages.length - 1
-                        ? lastMessageRef
-                        : null
-                }
+                ref={idx === activeMessages.length - 1 ? lastMessageRef : null}
                 key={idx}
                 className={`flex ${
                     msg.role === "user" ? "justify-end" : "justify-start"
@@ -327,38 +456,89 @@ function App() {
                             )}
                             <div className="flex flex-col gap-2">
                                 {chats.map((chat) => (
-                                    <button
+                                    <div
                                         key={chat.id}
-                                        onClick={() => setActiveChatId(chat.id)}
-                                        className={`text-left w-full px-3 py-3 rounded-lg border text-sm transition ${
+                                        className={`w-full px-3 py-3 rounded-lg border text-sm transition flex items-start gap-2 ${
                                             chat.id === activeChatId
                                                 ? "bg-blue-600 text-white border-blue-600"
                                                 : "bg-white text-gray-700 border-gray-200 hover:border-blue-400"
                                         }`}
                                     >
-                                        <div className="font-semibold">
-                                            {chat.address.slice(0, 6)}...
-                                            {chat.address.slice(-4)}
-                                        </div>
-                                        <div className="text-xs opacity-80">
-                                            Tag: {chat.tag}
-                                        </div>
-                                        <div className="text-xs">
-                                            Durum:{" "}
-                                            <span
-                                                className={
-                                                    chat.status === "done"
-                                                        ? "text-green-600"
-                                                        : chat.status ===
-                                                          "error"
-                                                        ? "text-red-600"
-                                                        : "text-gray-600"
+                                        <button
+                                            type="button"
+                                            onClick={() =>
+                                                setActiveChatId(chat.id)
+                                            }
+                                            className="text-left flex-1"
+                                        >
+                                            <div className="font-semibold">
+                                                {chat.address.slice(0, 6)}...
+                                                {chat.address.slice(-4)}
+                                            </div>
+                                            <div className="text-xs opacity-80">
+                                                Tag: {chat.tag}
+                                            </div>
+                                            <div className="text-xs">
+                                                Durum:{" "}
+                                                <span
+                                                    className={
+                                                        chat.status === "done"
+                                                            ? "text-green-200 md:text-green-100"
+                                                            : chat.status ===
+                                                              "error"
+                                                            ? "text-red-200 md:text-red-100"
+                                                            : "text-gray-200 md:text-gray-100"
+                                                    }
+                                                >
+                                                    {chat.status}
+                                                </span>
+                                            </div>
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                setChats((prev) => {
+                                                    const filtered =
+                                                        prev.filter(
+                                                            (c) =>
+                                                                c.id !== chat.id
+                                                        );
+                                                    if (
+                                                        activeChatId === chat.id
+                                                    ) {
+                                                        const nextActive =
+                                                            filtered[0]?.id ||
+                                                            null;
+                                                        setActiveChatId(
+                                                            nextActive
+                                                        );
+                                                        setActiveMessages(
+                                                            nextActive
+                                                                ? loadMessages(
+                                                                      nextActive
+                                                                  )
+                                                                : []
+                                                        );
+                                                    }
+                                                    return filtered;
+                                                });
+                                                // Remove messages from storage as well
+                                                if (
+                                                    typeof window !==
+                                                    "undefined"
+                                                ) {
+                                                    localStorage.removeItem(
+                                                        `${MSG_KEY_PREFIX}${chat.id}`
+                                                    );
                                                 }
-                                            >
-                                                {chat.status}
-                                            </span>
-                                        </div>
-                                    </button>
+                                            }}
+                                            className="text-xs px-2 py-1 rounded border border-red-500 text-white hover:bg-red-300 bg-red-500 transition font-semibold"
+                                            title="Chat'i sil"
+                                        >
+                                            ✕ Sil
+                                        </button>
+                                    </div>
                                 ))}
                             </div>
                         </div>

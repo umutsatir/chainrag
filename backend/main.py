@@ -5,6 +5,8 @@ import json
 import sys
 import subprocess
 import threading
+import time
+from collections import deque
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -46,11 +48,11 @@ llm = ChatGoogleGenerativeAI(
     temperature=0 
 )
 
-# Vector store cache per tag
-VECTOR_CACHE = {}
-
-# Prep job statuses per tag
-PREP_STATUS = {}
+VECTOR_CACHE = {}           # vector store cache per tag
+PREP_STATUS = {}            # preparation status per tag
+JOB_QUEUE = deque()         # sequential job queue to avoid parallel ingest
+QUEUE_LOCK = threading.Lock()
+WORKER_STARTED = False
 
 def sanitize_tag(raw_tag: str) -> str:
     import re
@@ -71,6 +73,57 @@ def load_vector_store(tag: str):
         return store
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to load vector DB: {e}")
+
+def job_exists_in_queue(cleaned_tag: str) -> bool:
+    with QUEUE_LOCK:
+        return any(job["tag"] == cleaned_tag for job in JOB_QUEUE)
+
+def enqueue_job(tag: str, address: str):
+    cleaned = sanitize_tag(tag)
+
+    # If DB already exists, mark done immediately and warm cache.
+    target_dir = DB_ROOT / cleaned
+    if target_dir.exists():
+        PREP_STATUS[cleaned] = {"state": "done", "message": "Vector DB already exists."}
+        VECTOR_CACHE.pop(cleaned, None)
+        try:
+            load_vector_store(cleaned)
+        except Exception as e:
+            PREP_STATUS[cleaned] = {"state": "error", "message": f"Load failed: {e}"}
+        return
+
+    # If already running or queued, just return current status
+    existing = PREP_STATUS.get(cleaned)
+    if existing and existing.get("state") == "running":
+        return
+    if job_exists_in_queue(cleaned):
+        return
+
+    with QUEUE_LOCK:
+        JOB_QUEUE.append({"tag": cleaned, "address": address})
+    PREP_STATUS[cleaned] = {"state": "queued", "message": "Queued for processing."}
+
+def worker_loop():
+    while True:
+        job = None
+        with QUEUE_LOCK:
+            if JOB_QUEUE:
+                job = JOB_QUEUE.popleft()
+        if not job:
+            time.sleep(1)
+            continue
+
+        tag = job["tag"]
+        address = job["address"]
+        PREP_STATUS[tag] = {"state": "running", "message": "Fetching data..."}
+        run_pipeline(tag, address)
+
+def ensure_worker_started():
+    global WORKER_STARTED
+    if not WORKER_STARTED:
+        t = threading.Thread(target=worker_loop, daemon=True)
+        t.start()
+        WORKER_STARTED = True
 
 def run_pipeline(tag: str, address: str):
     """
@@ -181,15 +234,19 @@ class PrepRequest(BaseModel):
 @app.post("/prepare")
 async def prepare_endpoint(req: PrepRequest):
     tag = sanitize_tag(req.address)
-    existing = PREP_STATUS.get(tag)
-    if existing and existing.get("state") in {"running", "done"}:
-        return {"tag": tag, "status": existing}
 
-    # Kick off background thread
-    thread = threading.Thread(target=run_pipeline, args=(tag, req.address), daemon=True)
-    thread.start()
-    PREP_STATUS[tag] = {"state": "running", "message": "Queued..."}
-    return {"tag": tag, "status": PREP_STATUS[tag]}
+    # If DB already exists, short-circuit
+    target_dir = DB_ROOT / tag
+    if target_dir.exists():
+        PREP_STATUS[tag] = {"state": "done", "message": "Vector DB already exists."}
+        VECTOR_CACHE.pop(tag, None)
+        load_vector_store(tag)
+        return {"tag": tag, "status": PREP_STATUS[tag]}
+
+    # Queue the job and ensure worker runs
+    enqueue_job(tag, req.address)
+    ensure_worker_started()
+    return {"tag": tag, "status": PREP_STATUS.get(tag, {"state": "queued"})}
 
 @app.get("/prepare/status")
 async def prepare_status(tag: str):
