@@ -1,9 +1,11 @@
+import argparse
 import os
 import json
 import requests
 from datetime import datetime, timezone
 from pathlib import Path
 from dotenv import load_dotenv
+import re
 
 # Paths
 CURRENT_SCRIPT_DIR = Path(__file__).resolve().parent
@@ -28,6 +30,17 @@ ETHERSCAN_CHAIN_ID = "1"  # Mainnet
 # We limit to the latest 10000 transactions to prevent database bloat
 # and ensure the RAG system remains fast and relevant.
 TX_LIMIT = 10000 
+
+def sanitize_tag(raw_tag: str) -> str:
+    """
+    Normalize a user-provided tag so it is filesystem-safe.
+    Keeps lowercase letters, numbers, dashes and underscores.
+    Falls back to a timestamp if the result is empty.
+    """
+    cleaned = re.sub(r"[^a-zA-Z0-9_-]+", "-", raw_tag).strip("-").lower()
+    if not cleaned:
+        cleaned = datetime.now(timezone.utc).strftime("run-%Y%m%d-%H%M%S")
+    return cleaned
 
 def save_json(path, data):
     with open(path, "w") as f:
@@ -167,13 +180,21 @@ def convert_to_documents(address, normal_txs, erc20_txs):
     return docs
 
 def main():
-    address = input("Enter Ethereum Address (e.g., Vitalik): ").strip()
+    parser = argparse.ArgumentParser(description="Fetch transactions and convert to RAG docs.")
+    parser.add_argument("--address", help="Ethereum address to fetch. If omitted, prompts interactively.")
+    args = parser.parse_args()
+
+    address = args.address or input("Enter Ethereum Address (e.g., Vitalik): ").strip()
     if not address:
         print("No address provided.")
         return
+    
+    # Tag derives from the public key to keep outputs discoverable per address
+    tag = sanitize_tag(address)
 
     print(f"\n📡 Fetching data for: {address}")
     print(f"   (Limit: Last {TX_LIMIT} transactions)")
+    print(f"   (Tag: {tag})")
 
     normal_txs = fetch_normal_transactions(address)
     print(f"✔ Fetched {len(normal_txs)} Normal ETH transactions.")
@@ -182,18 +203,23 @@ def main():
     print(f"✔ Fetched {len(erc20_txs)} ERC20 Token transfers.")
 
     # Save raw data for debugging
-    save_json(RAW_DIR / "normal_txs.json", normal_txs)
-    save_json(RAW_DIR / "erc20_transfers.json", erc20_txs)
+    raw_normal_path = RAW_DIR / f"{tag}_normal_txs.json"
+    raw_erc20_path = RAW_DIR / f"{tag}_erc20_transfers.json"
+    save_json(raw_normal_path, normal_txs)
+    save_json(raw_erc20_path, erc20_txs)
 
     # Convert to RAG format
     documents = convert_to_documents(address, normal_txs, erc20_txs)
     
     # Save processed data
-    write_jsonl(PROC_DIR / "documents.jsonl", documents)
+    processed_path = PROC_DIR / f"{tag}_documents.jsonl"
+    write_jsonl(processed_path, documents)
 
     print(f"\n✨ Successfully processed {len(documents)} documents.")
-    print(f"💾 Saved to: {PROC_DIR / 'documents.jsonl'}")
-    print("\nNext Step: Run 'python scripts/ingest_data.py' to build the vector database.")
+    print(f"💾 Saved processed: {processed_path}")
+    print(f"💾 Saved raw normal txs: {raw_normal_path}")
+    print(f"💾 Saved raw erc20 txs: {raw_erc20_path}")
+    print("\nNext Step: Run 'python scripts/ingest_data.py --tag {tag}' to build the vector database.")
 
 if __name__ == "__main__":
     if not ETHERSCAN_API_KEY:
