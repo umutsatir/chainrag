@@ -158,6 +158,12 @@ def run_pipeline(tag: str, address: str):
             PREP_STATUS[cleaned] = {"state": "error", "message": ingest_res.stderr or "ingest_data failed"}
             return
 
+        # Check if DB was actually created (it might be skipped if no docs found)
+        target_dir = DB_ROOT / cleaned
+        if not target_dir.exists():
+             PREP_STATUS[cleaned] = {"state": "error", "message": "No transactions found for this address."}
+             return
+
         PREP_STATUS[cleaned] = {"state": "done", "message": "Vector DB ready."}
         # Warm cache
         VECTOR_CACHE.pop(cleaned, None)
@@ -211,7 +217,7 @@ Answer the user's question based ONLY on the transaction list provided below (Co
 INSTRUCTIONS:
 1. Stick strictly to the dates, amounts, and tokens in the context.
 2. Present transactions in a clear, chronological order.
-3. For every transaction mentioned, include the last 4 digits of the hash in parentheses (e.g., ...a1b2).
+3. For every transaction mentioned, include the full transaction hash so the user can search for it.
 4. If no relevant data is found in the context, state "No relevant transactions found."
 
 Context:
