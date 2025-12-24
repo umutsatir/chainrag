@@ -111,8 +111,8 @@ def main():
     target_db_dir = resolve_db_dir(args.tag, args.db_dir)
 
     print(f"--- ChainRAG Embedding Module ---")
-    print(f"• Input File: {target_input}")
-    print(f"• Output DB: {target_db_dir}")
+    print(f"* Input File: {target_input}")
+    print(f"* Output DB: {target_db_dir}")
     print("-" * 40)
 
     # 1. Load Data
@@ -150,7 +150,7 @@ def main():
     
     vector_store.save_local(str(target_db_dir))
 
-    print("\n✅ PROCESS COMPLETED SUCCESSFULLY!")
+    print("\n[OK] PROCESS COMPLETED SUCCESSFULLY!")
     print(f"The Vector Database is ready. You can now start the Backend.")
 
 if __name__ == "__main__":

@@ -31,7 +31,7 @@ function App() {
         if (lastMessageRef.current) {
             lastMessageRef.current.scrollIntoView({
                 behavior: "smooth",
-                block: "start",
+                block: "end",
             });
         }
     }, [activeMessages]);
@@ -192,7 +192,7 @@ function App() {
             address: addressInput,
             tag,
             status: "preparing",
-            statusMessage: "Hazırlanıyor...",
+            statusMessage: "Preparing...",
             loading: false,
         };
         setChats((prev) => [...prev, newChat]);
@@ -229,7 +229,7 @@ function App() {
                         ? {
                               ...chat,
                               status: "error",
-                              statusMessage: "Hazırlık başlatılamadı.",
+                              statusMessage: "Preparation failed.",
                           }
                         : chat
                 )
@@ -283,7 +283,7 @@ function App() {
         } catch (err) {
             const errorMsg = {
                 role: "assistant",
-                content: "Bir hata oluştu. Backend çalışıyor mu?",
+                content: "An error occurred. Is the backend running?",
             };
             const finalMessages = [...updatedMessages, errorMsg];
             setActiveMessages(finalMessages);
@@ -304,8 +304,9 @@ function App() {
     const renderMessages = () => {
         if (!activeChat) {
             return (
-                <div className="text-center text-gray-400 mt-20">
-                    <p>Adres girip yeni bir chat başlat.</p>
+                <div className="flex flex-col items-center justify-center h-full text-slate-400 opacity-60">
+                    <div className="text-6xl mb-4">💬</div>
+                    <p className="text-lg font-medium">Select or start a chat to begin</p>
                 </div>
             );
         }
@@ -313,32 +314,37 @@ function App() {
         if (activeChat.status !== "done") {
             if (activeChat.status === "error") {
                 return (
-                    <div className="flex flex-col items-center justify-center h-full text-red-600 gap-2 text-sm">
-                        <p>
-                            Hazırlık hatası:{" "}
-                            {activeChat.statusMessage || "Bilinmeyen hata."}
-                        </p>
-                        <p className="text-xs text-gray-400">
-                            Tag: {activeChat.tag}
-                        </p>
+                    <div className="flex flex-col items-center justify-center h-full text-red-500 gap-3">
+                        <div className="bg-red-50 p-4 rounded-full">
+                            <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                        </div>
+                        <div className="text-center">
+                            <p className="font-semibold">Preparation Error</p>
+                            <p className="text-sm opacity-80">{activeChat.statusMessage || "Unknown error."}</p>
+                        </div>
                     </div>
                 );
             }
             return (
-                <div className="flex flex-col items-center justify-center h-full text-gray-600 gap-2">
-                    <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600" />
-                    <p>{activeChat.statusMessage || "Hazırlanıyor..."}</p>
-                    <p className="text-xs text-gray-400">
-                        Tag: {activeChat.tag}
-                    </p>
+                <div className="flex flex-col items-center justify-center h-full text-indigo-600 gap-4">
+                    <div className="relative">
+                        <div className="w-12 h-12 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin"></div>
+                    </div>
+                    <div className="text-center">
+                        <p className="font-medium text-slate-600">{activeChat.statusMessage || "Preparing..."}</p>
+                        <p className="text-xs text-slate-400 mt-1 font-mono bg-slate-100 px-2 py-1 rounded-md inline-block">
+                            Tag: {activeChat.tag}
+                        </p>
+                    </div>
                 </div>
             );
         }
 
         if (activeMessages.length === 0) {
             return (
-                <div className="text-center text-gray-400 mt-20">
-                    <p>Henüz mesaj yok. Sorunu yaz.</p>
+                <div className="flex flex-col items-center justify-center h-full text-slate-400">
+                    <p className="text-lg">No messages yet.</p>
+                    <p className="text-sm">Type your question below to start analyzing.</p>
                 </div>
             );
         }
@@ -349,53 +355,41 @@ function App() {
                 key={idx}
                 className={`flex ${
                     msg.role === "user" ? "justify-end" : "justify-start"
-                }`}
+                } mb-4`}
             >
                 <div
-                    className={`max-w-[80%] p-4 rounded-2xl shadow-sm wrap-break-word whitespace-pre-wrap ${
+                    className={`max-w-[85%] md:max-w-[75%] p-4 rounded-2xl shadow-sm text-sm md:text-base break-words overflow-hidden ${
                         msg.role === "user"
-                            ? "bg-blue-600 text-white rounded-br-none"
-                            : "bg-gray-100 text-gray-800 border border-gray-200 rounded-bl-none"
+                            ? "bg-indigo-600 text-white rounded-br-none"
+                            : "bg-white text-slate-700 border border-slate-100 rounded-bl-none"
                     }`}
                 >
-                    <div className="text-sm md:text-base leading-relaxed">
+                    <div className="leading-relaxed">
                         {msg.role === "assistant" ? (
                             <ReactMarkdown
                                 components={{
                                     strong: ({ node, ...props }) => (
-                                        <span
-                                            className="font-bold"
-                                            {...props}
-                                        />
+                                        <span className="font-bold text-indigo-900" {...props} />
                                     ),
                                     ul: ({ node, ...props }) => (
-                                        <ul
-                                            className="list-disc pl-5 my-2"
-                                            {...props}
-                                        />
+                                        <ul className="list-disc pl-5 my-2 space-y-1" {...props} />
                                     ),
                                     ol: ({ node, ...props }) => (
-                                        <ol
-                                            className="list-decimal pl-5 my-2"
-                                            {...props}
-                                        />
+                                        <ol className="list-decimal pl-5 my-2 space-y-1" {...props} />
                                     ),
                                     li: ({ node, ...props }) => (
-                                        <li className="mb-1" {...props} />
+                                        <li className="" {...props} />
                                     ),
                                     p: ({ node, ...props }) => (
-                                        <p
-                                            className="mb-2 last:mb-0"
-                                            {...props}
-                                        />
+                                        <p className="mb-2 last:mb-0" {...props} />
                                     ),
                                     a: ({ node, ...props }) => (
-                                        <a
-                                            className="text-blue-600 hover:underline"
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            {...props}
-                                        />
+                                        <a className="text-indigo-500 hover:underline font-medium" target="_blank" rel="noopener noreferrer" {...props} />
+                                    ),
+                                    code: ({ node, inline, className, children, ...props }) => (
+                                        <code className={`${inline ? "bg-slate-100 text-slate-800 px-1 py-0.5 rounded text-xs font-mono" : "block bg-slate-800 text-slate-100 p-3 rounded-lg overflow-x-auto text-xs my-2"}`} {...props}>
+                                            {children}
+                                        </code>
                                     ),
                                 }}
                             >
@@ -406,9 +400,9 @@ function App() {
                         )}
                     </div>
                     {msg.sources && msg.sources.length > 0 && (
-                        <div className="mt-3 pt-2 border-top border-gray-300/50 text-xs opacity-75">
-                            <span className="font-semibold">📚 Sources:</span>{" "}
-                            {msg.sources.length} documents scanned.
+                        <div className="mt-3 pt-3 border-t border-slate-200/50 text-xs opacity-70 flex items-center gap-1">
+                            <span>📚</span>
+                            <span className="font-medium">{msg.sources.length} sources</span>
                         </div>
                     )}
                 </div>
@@ -417,178 +411,141 @@ function App() {
     };
 
     return (
-        <div className="min-h-screen bg-gray-100 py-10 px-4 font-sans flex justify-center">
-            <div className="w-[90vw] max-w-7xl">
-                <h1 className="text-4xl font-bold text-center text-blue-600 mb-8 tracking-tight">
-                    ChainRAG 🔗
-                </h1>
+        <div className="min-h-screen bg-slate-50 font-sans text-slate-900 flex justify-center py-4 px-4 md:px-8">
+            <div className="w-full max-w-7xl grid grid-cols-12 gap-6 h-[92vh]">
+                
+                {/* Sidebar */}
+                <div className="col-span-12 md:col-span-4 lg:col-span-3 flex flex-col gap-4 h-full min-h-0">
+                    {/* Header / Logo */}
+                    <div className="flex items-center gap-2 px-2">
+                        <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white font-bold text-xl">C</div>
+                        <h1 className="text-2xl font-bold text-slate-800 tracking-tight">ChainRAG</h1>
+                    </div>
 
-                <div className="grid grid-cols-12 gap-4">
-                    {/* Sidebar */}
-                    <div className="col-span-12 md:col-span-4 lg:col-span-3 space-y-4">
-                        {/* New chat creator */}
-                        <div className="bg-white border border-gray-200 rounded-xl shadow-md p-3 flex gap-2 items-center min-h-[56px]">
-                            <input
-                                value={addressInput}
-                                onChange={(e) =>
-                                    setAddressInput(e.target.value)
-                                }
-                                placeholder="Ethereum address"
-                                className="flex-1 min-w-0 h-10 px-3 outline-none text-gray-700 placeholder-gray-400 bg-transparent text-sm truncate"
-                                onKeyPress={(e) =>
-                                    e.key === "Enter" && startChat()
-                                }
-                            />
-                            <button
-                                onClick={startChat}
-                                className="h-10 px-4 rounded-lg font-medium bg-blue-600 hover:bg-blue-700 text-white shadow-md hover:shadow-lg shrink-0 text-sm"
-                            >
-                                Yeni
-                            </button>
+                    {/* New Chat Input */}
+                    <div className="bg-white p-1.5 rounded-xl shadow-sm border border-slate-200 flex gap-2">
+                        <input
+                            value={addressInput}
+                            onChange={(e) => setAddressInput(e.target.value)}
+                            placeholder="0x..."
+                            className="flex-1 min-w-0 h-10 px-3 outline-none text-slate-700 placeholder-slate-400 bg-transparent text-sm font-mono"
+                            onKeyPress={(e) => e.key === "Enter" && startChat()}
+                        />
+                        <button
+                            onClick={startChat}
+                            className="h-10 px-4 rounded-lg font-medium bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm transition-all text-sm whitespace-nowrap"
+                        >
+                            + New
+                        </button>
+                    </div>
+
+                    {/* Chat List */}
+                    <div className="flex-1 bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden flex flex-col">
+                        <div className="p-3 border-b border-slate-100 bg-slate-50/50">
+                            <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Recent Chats</h2>
                         </div>
-
-                        {/* Chat list */}
-                        <div className="bg-white border border-gray-200 rounded-xl shadow-md p-3 h-[640px] overflow-y-auto">
+                        <div className="flex-1 overflow-y-auto p-2 space-y-1">
                             {chats.length === 0 && (
-                                <div className="text-center text-gray-400 text-sm py-10">
-                                    Henüz chat yok.
+                                <div className="text-center text-slate-400 text-sm py-10 px-4">
+                                    No active sessions. Start a new chat above.
                                 </div>
                             )}
-                            <div className="flex flex-col gap-2">
-                                {chats.map((chat) => (
-                                    <div
-                                        key={chat.id}
-                                        className={`w-full px-3 py-3 rounded-lg border text-sm transition flex items-start gap-2 ${
-                                            chat.id === activeChatId
-                                                ? "bg-blue-600 text-white border-blue-600"
-                                                : "bg-white text-gray-700 border-gray-200 hover:border-blue-400"
-                                        }`}
-                                    >
+                            {chats.map((chat) => (
+                                <div
+                                    key={chat.id}
+                                    onClick={() => setActiveChatId(chat.id)}
+                                    className={`group w-full p-3 rounded-xl text-sm transition-all cursor-pointer border ${
+                                        chat.id === activeChatId
+                                            ? "bg-indigo-50 border-indigo-200 shadow-sm"
+                                            : "bg-transparent border-transparent hover:bg-slate-50 hover:border-slate-100"
+                                    }`}
+                                >
+                                    <div className="flex justify-between items-start mb-1">
+                                        <span className={`font-mono font-medium ${chat.id === activeChatId ? "text-indigo-700" : "text-slate-700"}`}>
+                                            {chat.address.slice(0, 6)}...{chat.address.slice(-4)}
+                                        </span>
                                         <button
-                                            type="button"
-                                            onClick={() =>
-                                                setActiveChatId(chat.id)
-                                            }
-                                            className="text-left flex-1"
-                                        >
-                                            <div className="font-semibold">
-                                                {chat.address.slice(0, 6)}...
-                                                {chat.address.slice(-4)}
-                                            </div>
-                                            <div className="text-xs opacity-80">
-                                                Tag: {chat.tag}
-                                            </div>
-                                            <div className="text-xs">
-                                                Durum:{" "}
-                                                <span
-                                                    className={
-                                                        chat.status === "done"
-                                                            ? "text-green-200 md:text-green-100"
-                                                            : chat.status ===
-                                                              "error"
-                                                            ? "text-red-200 md:text-red-100"
-                                                            : "text-gray-200 md:text-gray-100"
-                                                    }
-                                                >
-                                                    {chat.status}
-                                                </span>
-                                            </div>
-                                        </button>
-                                        <button
-                                            type="button"
                                             onClick={(e) => {
                                                 e.stopPropagation();
                                                 setChats((prev) => {
-                                                    const filtered =
-                                                        prev.filter(
-                                                            (c) =>
-                                                                c.id !== chat.id
-                                                        );
-                                                    if (
-                                                        activeChatId === chat.id
-                                                    ) {
-                                                        const nextActive =
-                                                            filtered[0]?.id ||
-                                                            null;
-                                                        setActiveChatId(
-                                                            nextActive
-                                                        );
-                                                        setActiveMessages(
-                                                            nextActive
-                                                                ? loadMessages(
-                                                                      nextActive
-                                                                  )
-                                                                : []
-                                                        );
+                                                    const filtered = prev.filter((c) => c.id !== chat.id);
+                                                    if (activeChatId === chat.id) {
+                                                        const nextActive = filtered[0]?.id || null;
+                                                        setActiveChatId(nextActive);
+                                                        setActiveMessages(nextActive ? loadMessages(nextActive) : []);
                                                     }
                                                     return filtered;
                                                 });
-                                                // Remove messages from storage as well
-                                                if (
-                                                    typeof window !==
-                                                    "undefined"
-                                                ) {
-                                                    localStorage.removeItem(
-                                                        `${MSG_KEY_PREFIX}${chat.id}`
-                                                    );
+                                                if (typeof window !== "undefined") {
+                                                    localStorage.removeItem(`${MSG_KEY_PREFIX}${chat.id}`);
                                                 }
                                             }}
-                                            className="text-xs px-2 py-1 rounded border border-red-500 text-white hover:bg-red-300 bg-red-500 transition font-semibold"
-                                            title="Chat'i sil"
+                                            className="opacity-0 group-hover:opacity-100 text-slate-400 hover:text-red-500 transition-opacity p-1"
+                                            title="Delete"
                                         >
-                                            ✕ Sil
+                                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                                         </button>
                                     </div>
-                                ))}
-                            </div>
+                                    <div className="flex items-center justify-between">
+                                        <span className="text-xs text-slate-400 truncate max-w-[100px]">{chat.tag}</span>
+                                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
+                                            chat.status === "done" ? "bg-green-100 text-green-700" :
+                                            chat.status === "error" ? "bg-red-100 text-red-700" :
+                                            "bg-amber-100 text-amber-700"
+                                        }`}>
+                                            {chat.status === "done" ? "Ready" : chat.status}
+                                        </span>
+                                    </div>
+                                </div>
+                            ))}
                         </div>
                     </div>
+                </div>
 
-                    {/* Chat area */}
-                    <div className="col-span-12 md:col-span-8 lg:col-span-9 space-y-4">
-                        <div className="bg-white border border-gray-200 rounded-xl shadow-lg p-6 h-[600px] overflow-y-auto flex flex-col space-y-4">
+                {/* Main Chat Area */}
+                <div className="col-span-12 md:col-span-8 lg:col-span-9 flex flex-col h-full gap-4 min-h-0">
+                    {/* Messages */}
+                    <div className="flex-1 bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden flex flex-col relative">
+                        <div className="flex-1 overflow-y-auto p-6">
                             {renderMessages()}
                             {activeChat?.loading && (
-                                <div className="flex justify-start animate-pulse">
-                                    <div className="bg-gray-200 p-4 rounded-2xl rounded-bl-none text-gray-500 text-sm">
-                                        Typing...
+                                <div className="flex justify-start animate-pulse mt-4">
+                                    <div className="bg-slate-100 px-4 py-3 rounded-2xl rounded-bl-none text-slate-500 text-sm flex items-center gap-2">
+                                        <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                                        <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                                        <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
                                     </div>
                                 </div>
                             )}
                         </div>
-
-                        <div className="flex gap-3 bg-white p-2 rounded-xl shadow-md border border-gray-200">
-                            <input
-                                value={query}
-                                onChange={(e) => setQuery(e.target.value)}
-                                placeholder="Sorunu yaz (aktif chat'in DB'si kullanılacak)"
-                                className="flex-1 p-3 outline-none text-gray-700 placeholder-gray-400 bg-transparent"
-                                onKeyPress={(e) =>
-                                    e.key === "Enter" && sendMessage()
-                                }
-                                disabled={
-                                    !activeChat ||
-                                    activeChat.status !== "done" ||
-                                    activeChat.loading
-                                }
-                            />
-                            <button
-                                onClick={sendMessage}
-                                disabled={
-                                    !activeChat ||
-                                    activeChat.status !== "done" ||
-                                    activeChat.loading
-                                }
-                                className={`px-6 py-3 rounded-lg font-medium transition-colors duration-200 hover:cursor-pointer ${
-                                    !activeChat ||
-                                    activeChat.status !== "done" ||
-                                    activeChat.loading
-                                        ? "bg-gray-300 cursor-not-allowed text-gray-500"
-                                        : "bg-blue-600 hover:bg-blue-700 text-white shadow-md hover:shadow-lg"
-                                }`}
-                            >
-                                Gönder
-                            </button>
+                        
+                        {/* Input Area */}
+                        <div className="p-4 bg-white border-t border-slate-100">
+                            <div className="flex gap-2 bg-slate-50 p-2 rounded-xl border border-slate-200 focus-within:border-indigo-300 focus-within:ring-4 focus-within:ring-indigo-500/10 transition-all">
+                                <input
+                                    value={query}
+                                    onChange={(e) => setQuery(e.target.value)}
+                                    placeholder={activeChat?.status === "done" ? "Ask about transactions, balances, or patterns..." : "Waiting for preparation..."}
+                                    className="flex-1 px-3 bg-transparent outline-none text-slate-700 placeholder-slate-400"
+                                    onKeyPress={(e) => e.key === "Enter" && sendMessage()}
+                                    disabled={!activeChat || activeChat.status !== "done" || activeChat.loading}
+                                />
+                                <button
+                                    onClick={sendMessage}
+                                    disabled={!activeChat || activeChat.status !== "done" || activeChat.loading}
+                                    className={`px-4 py-2 rounded-lg font-medium transition-all flex items-center gap-2 ${
+                                        !activeChat || activeChat.status !== "done" || activeChat.loading
+                                            ? "bg-slate-200 text-slate-400 cursor-not-allowed"
+                                            : "bg-indigo-600 hover:bg-indigo-700 text-white shadow-md hover:shadow-lg active:scale-95"
+                                    }`}
+                                >
+                                    <span>Send</span>
+                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
+                                </button>
+                            </div>
+                            <div className="text-center mt-2">
+                                <p className="text-[10px] text-slate-400">AI can make mistakes. Verify important transaction data.</p>
+                            </div>
                         </div>
                     </div>
                 </div>

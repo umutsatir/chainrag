@@ -192,15 +192,15 @@ def main():
     # Tag derives from the public key to keep outputs discoverable per address
     tag = sanitize_tag(address)
 
-    print(f"\n📡 Fetching data for: {address}")
+    print(f"\n[INFO] Fetching data for: {address}")
     print(f"   (Limit: Last {TX_LIMIT} transactions)")
     print(f"   (Tag: {tag})")
 
     normal_txs = fetch_normal_transactions(address)
-    print(f"✔ Fetched {len(normal_txs)} Normal ETH transactions.")
+    print(f"[OK] Fetched {len(normal_txs)} Normal ETH transactions.")
     
     erc20_txs = fetch_erc20_transfers(address)
-    print(f"✔ Fetched {len(erc20_txs)} ERC20 Token transfers.")
+    print(f"[OK] Fetched {len(erc20_txs)} ERC20 Token transfers.")
 
     # Save raw data for debugging
     raw_normal_path = RAW_DIR / f"{tag}_normal_txs.json"
@@ -215,10 +215,10 @@ def main():
     processed_path = PROC_DIR / f"{tag}_documents.jsonl"
     write_jsonl(processed_path, documents)
 
-    print(f"\n✨ Successfully processed {len(documents)} documents.")
-    print(f"💾 Saved processed: {processed_path}")
-    print(f"💾 Saved raw normal txs: {raw_normal_path}")
-    print(f"💾 Saved raw erc20 txs: {raw_erc20_path}")
+    print(f"\n[SUCCESS] Successfully processed {len(documents)} documents.")
+    print(f"[SAVED] Saved processed: {processed_path}")
+    print(f"[SAVED] Saved raw normal txs: {raw_normal_path}")
+    print(f"[SAVED] Saved raw erc20 txs: {raw_erc20_path}")
     print("\nNext Step: Run 'python scripts/ingest_data.py --tag {tag}' to build the vector database.")
 
 if __name__ == "__main__":
